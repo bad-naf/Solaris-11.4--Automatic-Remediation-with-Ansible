@@ -1,0 +1,619 @@
+- hosts: all
+  tasks:
+  - name: Service svc:/network/firewall is enabled
+    copy:
+      dest: "/etc/firewall/pf.conf"
+      content: |
+        #
+        # Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+        #
+        # This is the default PF configuration file. The rules found here provide
+        # no policy/protection. To set up desired policy you must add your
+        # own rules here. See pf.conf(7) for details.
+        #
+        # As soon as firewall gets enabled with configuration shipped by the firewall
+        # package, the firewall service is transitioned to degraded state.  This is to
+        # let system administrator know the firewall is not configured yet, such
+        # firewall can not provide any network protection.
+        #
+
+        #
+        # PF does IP reassembly by default. We also use 'no-df' option on Solaris
+        # to ensure IP reassembly working with broken stacks which can send packets
+        # with invalid flag combination 'MF|DF'.
+        #
+        set reassemble yes no-df
+
+        #
+        # We don't want PF to filter on loopback traffic by default.
+        # 
+        # Filtering on loopback can interfere with zone installation and other
+        # operations due to Solaris loopback optimizations. See the pf.conf(7)
+        # manpage for guidance on how to enable it for your application.
+        set skip on lo0
+  - name: Enable firewall
+    command: /usr/sbin/svcadm enable svc:/network/firewall:default
+        
+
+  
+  - name: The tcp_wrappers feature is enabled
+    copy:
+      dest: "/etc/hosts.deny"
+      content: |
+        ALL:ALL
+
+  
+  - name: The tcp_wrappers feature is enabled
+    copy:
+      dest: "/etc/hosts.allow"
+      content: |
+        #ALL:ALL
+
+
+  
+  - name: swap(8) is encrypted and A size limit is set on tmpfs(4FS)
+    copy:
+      dest: "/etc/vfstab"
+      content: |
+        #device         device          mount           FS      fsck    mount   mount
+        #to mount       to fsck         point           type    pass    at boot options
+        #
+        # START Informational entries for filesystems mounted by the kernel
+        #/devices       -               /devices        devfs   -       no      -
+        #/proc          -               /proc           proc    -       no      -
+        #ctfs           -               /system/contract ctfs   -       no      -
+        #objfs          -               /system/object  objfs   -       no      -
+        #sharefs        -               /etc/dfs/sharetab       sharefs -       no      -
+        #fd             -               /dev/fd         fd      -       no      -
+        swap            -               /tmp            tmpfs   -       yes     size=340m
+        # END Informational entries for filesystems mounted by the kernel
+
+        /dev/zvol/dsk/rpool/swap        -               -               swap    -       no      encrypted
+
+  - name: restarting the file system 
+    command: /usr/sbin/svcadm restart filesystem/local
+
+  - name: Service svc:/system/rad:remote is in enabled state
+    copy:
+      dest: "/root/rad-remote.sh"
+      content: |
+        #!/bin/bash
+        rad_remote_fmri=svc:/system/rad:remote
+        policy_rad_remote=enabled
+        if  $policy_rad_remote == enabled ]; then
+                svcadm enable -s $rad_remote_fmri
+        else
+                svcadm disable -s $rad_remote_fmri
+        fi
+  - name: change mode of the rad.sh file
+    file:
+      path: "/root/rad-remote.sh"
+      mode: 0700
+      owner: root
+  - name: Execute the rad script
+    command: sh /root/rad-remote.sh
+
+  
+  - name: The r-protocols services are disabled in PAM || rlogin
+    copy:
+      dest: "/etc/pam.d/rlogin"
+      content: |
+        #
+        # Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+        #
+        # PAM configuration
+        #
+        # rlogin service (explicit because of pam_rhost_auth)
+        #
+        #auth definitive                pam_user_policy.so.1
+        #auth sufficient                pam_rhosts_auth.so.1
+        #auth requisite         pam_authtok_get.so.1
+        #auth required          pam_dhkeys.so.1
+        #auth required          pam_unix_auth.so.1
+        #auth required          pam_unix_cred.so.1
+
+        auth definitive    pam_deny.so.1
+        auth sufficient    pam_deny.so.1
+        auth required      pam_deny.so.1
+  
+  - name: The r-protocols services are disabled in PAM || rsh
+    copy:
+      dest: "/etc/pam.d/rsh"
+      content: |
+        #
+        # Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+        #
+        # PAM configuration
+        #
+        # rsh service (explicit because of pam_rhosts_auth(7), and pam_unix_cred(7)
+        # for meaningful pam_setcred(3PAM))
+        #
+        #auth definitive                pam_user_policy.so.1
+        #auth sufficient                pam_rhosts_auth.so.1
+        #auth required          pam_unix_cred.so.1
+
+        auth definitive    pam_deny.so.1
+        auth sufficient    pam_deny.so.1
+        auth required      pam_deny.so.1
+
+
+  
+  - name: mesg(1) prevents talk(1) and write(1) access to remote terminals
+    copy:
+      dest: "/root/mesg.sh"
+      content: |
+        #!/bin/bash 
+        if ! /bin/grep -q "^mesg -*n" /etc/.login
+        then
+            /bin/cp /etc/.login /etc/.login.`date '+%FT%T'`
+            /bin/echo "mesg -n" >> /etc/.login
+        fi
+        if ! /bin/grep -q "^mesg -*n" /etc/profile
+        then
+            /bin/cp /etc/profile /etc/profile.`date '+%FT%T'`
+            /bin/echo "mesg -n" >> /etc/profile
+        fi
+  - name: change mode of the mesg.sh file
+    file:
+      path: "/root/mesg.sh"
+      mode: 0700
+      owner: root
+  - name: Execute the mesg script
+    command: sh /root/mesg.sh
+
+  
+  - name: Service svc:/network/nfs/fedfs-client:default is in disabled state
+    copy:
+      dest: "/root/fedfs.sh"
+      content: |
+        #!/bin/bash 
+        fedfs_client_fmri=svc:/network/nfs/fedfs-client:default
+        policy_fedfs_client=disabled
+        if [ $policy_fedfs_client == enabled ]; then
+                svcadm enable -s $fedfs_client_fmri
+        else
+                svcadm disable -s $fedfs_client_fmri
+        fi
+  - name: change mode of the fedfs.sh file
+    file:
+      path: "/root/fedfs.sh"
+      mode: 0700
+      owner: root
+  - name: Execute the mesg script
+    command: sh /root/fedfs.sh
+  
+  
+  - name: Service svc:/application/cups/in-lpd:default is in disabled state
+    copy:
+      dest: "/root/lpd.sh"
+      content: |
+        #!/bin/bash 
+        lpd_fmri=svc:/application/cups/in-lpd:default
+        policy_lpd=disabled
+        if [ $policy_lpd == enabled ]; then
+                svcadm enable -s $lpd_fmri
+        else
+                svcadm disable -s $lpd_fmri
+        fi
+  - name: change mode of the lpd.sh file
+    file:
+      path: "/root/lpd.sh"
+      mode: 0700
+      owner: root
+  - name: Execute the lpd script
+    command: sh /root/lpd.sh 
+
+  
+  - name: /etc/motd contain appropriate policy text
+    copy:
+      dest: "/etc/motd"
+      content: |
+        THIS IS A MOTD
+  - name: /etc/issue contain appropriate policy text
+    copy:
+      dest: "/etc/issue"
+      content: |
+        THIS IS AN iSSUE
+  
+  
+  - name: /Use of the cron(8) and at(1) daemons is restricted
+    copy:
+      dest: "/root/cron.sh"
+      content: |
+        #!/bin/bash
+        if [ -f /etc/cron.d/cron.allow ]; then
+            /bin/mv /etc/cron.d/cron.allow /etc/cron.d/cron.allow.`date '+%FT%T'`
+        fi    
+        /bin/echo root > /etc/cron.d/cron.allow
+        /bin/chmod 644 /etc/cron.d/cron.allow
+        /bin/chgrp sys /etc/cron.d/cron.allow 
+        if [ -f /etc/cron.d/at.allow ]; then
+            /bin/mv /etc/cron.d/at.allow /etc/cron.d/at.allow.`date '+%FT%T'`
+        fi
+        /bin/touch /etc/cron.d/at.allow
+        /bin/chmod 644 /etc/cron.d/at.allow
+        /bin/chgrp sys /etc/cron.d/at.allow
+  - name: change mode of the fedfs.sh file
+    file:
+      path: "/root/cron.sh"
+      mode: 0700
+      owner: root
+  - name: Execute the cron script
+    command: sh /root/cron.sh
+
+  
+  - name: Files written in ftp(1) sessions have a suitable umask
+    copy:
+      dest: "/etc/proftpd.conf"
+      content: |
+        ServerName                      "FTP server"
+        ServerIdent                     off
+        ServerType                      standalone
+        DefaultServer                   on
+        Port                            21
+
+        Umask                           027
+
+        # To prevent DoS attacks, set the maximum number of child processes
+        # to 30.  If you need to allow more than 30 concurrent connections
+        # at once, simply increase this value.  Note that this ONLY works
+        # in standalone mode, in inetd mode you should use an inetd server
+        # that allows you to limit maximum number of processes per service
+        # (such as xinetd).
+        MaxInstances                    30
+
+        # Set the user and group under which the server will run.
+        User                            ftp
+        Group                           ftp
+
+        # Normally, we want files to be overwriteable.
+        AllowOverwrite          on
+
+        # Bar use of SITE CHMOD by default.
+        <Limit SITE_CHMOD>
+          DenyAll
+        </Limit>
+
+        # Make PAM the final authority on what gets authenticated.
+        AuthOrder mod_auth_pam.c* mod_auth_unix.c
+
+        # Use system libraries for user lookups.
+        PersistentPasswd off
+
+        # Root login must be enabled explicitly. It is not permitted by default.
+        # Allow it only if you know what you are doing.
+        #RootLogin on
+
+        DisplayConnect          /etc/issue
+
+ 
+  - name: Audit parameters are set to recommended values
+    copy:
+      dest: "/root/audit.sh"
+      content: |
+        #!/bin/bash 
+        /usr/sbin/auditconfig -setpolicy argv,cnt
+        /usr/sbin/auditconfig -setflags lo
+        /usr/sbin/auditconfig -setnaflags lo
+        /usr/sbin/auditconfig -setplugin audit_binfile active
+        if [ "`/usr/bin/userattr type root`" = "role" ]; then
+            /usr/sbin/rolemod -K audit_flags=cusa:no root
+        else
+            /usr/sbin/usermod -K audit_flags=cusa:no root
+        fi
+        /usr/sbin/audit -s
+  - name: change mode of the audit.sh file
+    file:
+      path: "/root/audit.sh"
+      mode: 0700
+      owner: root
+  - name: Execute the audit script
+    command: sh /root/audit.sh
+
+  
+  - name: All roles are audited with the "cusa" audit class
+    copy:
+      dest: "/root/cusa.sh"
+      content: |
+        #!/bin/bash 
+          for role in $(logins -S files -o -r | cut -f1 -d:); do
+        flags=$(userattr audit_flags $role | cut -f1 -d:)
+        if [ "$flags" != "cusa" ]; then
+          rolemod -K audit_flags=cusa:no $role
+        fi
+          done
+  - name: change mode of the cusa.sh file
+    file:
+      path: "/root/cusa.sh"
+      mode: 0700
+      owner: root
+  - name: Execute the cusa script
+    command: sh /root/cusa.sh
+
+  
+  - name: Passwords must have at least 1 special characters && Passwords must be changed at least every 13 weeks
+    copy:
+      dest: "/etc/default/passwd"
+      content: |
+        #
+        # Copyright (c) 1989, 2016, Oracle and/or its affiliates. All rights reserved.
+        #
+
+        #
+        # The default password ageing policy can be specified in either days
+        # or in weeks.  When the default values are specified for either MAXWEEKS
+        # or MINWEEKS the shadow(5) database is updated using units of days.
+        # It is an error to set both the WEEKS and the DAYS variant for a 
+        # given MIN/MAX/WARN variable.
+        # The MIN and WARN policies ore only active if a MAX policy is also set.
+        #
+        #MAXDAYS=
+        #MINDAYS=
+        #WARNDAYS=
+        MAXWEEKS=13
+        MINWEEKS=3
+        #WARNWEEKS=
+
+        #PASSLENGTH=8
+
+        # NAMECHECK enables/disables login name checking.
+        # The default is to do login name checking.
+        # Specifying a value of "NO" will disable login name checking.
+        #
+        #NAMECHECK=YES
+
+        # HISTORY sets the number of prior password changes to keep and
+        # check for a user when changing passwords.  Setting the HISTORY
+        # value to zero (0), or removing/commenting out the flag will
+        # cause all users' prior password history to be discarded at the
+        # next password change by any user.  No password history will
+        # be checked if the flag is not present or has zero value.
+        # The maximum value of HISTORY is 26.
+        #
+        # This flag is only enforced for user accounts defined in the
+        # local passwd(5)/shadow(5) files.
+        #
+        HISTORY=10
+        #
+        # Password complexity tunables.  The values listed are the defaults
+        # which are compatible with previous releases of passwd.
+        # See passwd(1) and pam_authtok_check(7) for use warnings and
+        # discussion of the use of these options.
+        #
+        #MINDIFF=3
+        #MINALPHA=2
+        #MINNONALPHA=1
+        #MINUPPER=1
+        MINUPPER=0
+        MINLOWER=1
+        #MAXREPEATS=0
+        MINSPECIAL=1
+        #MINDIGIT=1
+        MINDIGIT=0
+        #WHITESPACE=YES
+        #
+        # 
+        # passwd performs dictionary lookups if DICTIONLIST or DICTIONDBDIR
+        # is defined. If the password database does not yet exist, it is
+        # created by passwd. See passwd(1), pam_authtok_check(7) and
+        # mkpwdict(8) for more information.
+        #
+        #DICTIONLIST=
+        #DICTIONDBDIR=/var/passwd
+        #DICTIONMINWORDLENGTH=3
+  
+  - name: DISABLETIME is set for logins && SLEEPTIME following an invalid login attempt is set to 4
+    copy:
+      dest: "/etc/default/login"
+      content: |
+        #
+        # Copyright (c) 1989, 2016, Oracle and/or its affiliates. All rights reserved.
+
+        # ULIMIT sets the file size limit for the login.  Units are disk blocks.
+        # The default of zero means no limit.
+        #
+        #ULIMIT=0
+
+        # If CONSOLE is set, root can only login on that device.
+        # If the specified device is /dev/console, then root can also log into
+        # any of the currently enabled /dev/vt/# virtual terminal devices.
+        # Comment this line out to allow remote login by root.
+        #
+        CONSOLE=/dev/console
+
+        # PASSREQ determines if login requires a password.
+        #
+        PASSREQ=YES
+
+        # ALTSHELL determines if the SHELL environment variable should be set
+        #
+        ALTSHELL=YES
+
+        # PATH sets the initial shell PATH variable
+        #
+        #PATH=/usr/bin:/usr/sbin
+
+        # SUPATH sets the initial shell PATH variable for root
+        #
+        #SUPATH=/usr/bin:/usr/sbin
+
+        # TIMEOUT sets the number of seconds (between 0 and 900) to wait before
+        # abandoning a login session.
+        # 
+        #TIMEOUT=300
+
+        # UMASK sets the initial shell file creation mode mask.  See umask(1).
+        #
+        #UMASK=022
+
+        # SYSLOG determines whether the syslog(3) LOG_AUTH facility should be used
+        # to log all root logins at level LOG_NOTICE and multiple failed login
+        # attempts at LOG_CRIT.
+        #
+        SYSLOG=YES
+
+        # SLEEPTIME controls the number of seconds that the command should
+        # wait before printing the "login incorrect" message when a
+        # bad password is provided.  The range is limited from
+        # 0 to 5 seconds.
+        #
+        SLEEPTIME=4
+
+        # DISABLETIME  If present, and greater than zero, the number of seconds
+        # login will wait after RETRIES failed attempts or the PAM framework returns 
+        # PAM_ABORT. Default is 20. Minimum is 0. No maximum is imposed.
+        # 
+        DISABLETIME=20
+
+        # RETRIES determines the number of failed logins that will be
+        # allowed before login exits. Default is 5 and maximum is 15.
+        # If account locking is configured (user_attr(5)/policy.conf(5))
+        # for a local user's account (passwd(5)/shadow(5)), that account
+        # will be locked if failed logins equals or exceeds RETRIES.
+        #
+        #RETRIES=5
+        #
+        # The SYSLOG_FAILED_LOGINS variable is used to determine how many failed
+        # login attempts will be allowed by the system before a failed login
+        # message is logged, using the syslog(3) LOG_NOTICE facility.  For example,
+        # if the variable is set to 0, login will log -all- failed login attempts.
+        #
+        #SYSLOG_FAILED_LOGINS=5
+
+  
+  - name: Inactive user accounts will be locked after 35 days   
+    command: /usr/sbin/useradd -D -f 35
+  - name: User home directories have appropriate permissions   
+    file:
+      path: "/export/home/bad"
+      mode: 0750
+      owner: bad
+  
+ # - name: Package integrity is verified   
+  #  command: /usr/bin/pkg fix
+  
+  - name: coreadm(8) configuration is correct   
+    command: /usr/bin/coreadm -g /var/cores/core_%n_%f_%u_%g_%t_%p -e log -e global -e global-setid -d process -d proc-setid
+  - name: give permissions to the cores   
+    file:
+      path: "/var/share/cores"
+      mode: 0700
+      owner: root
+  
+  - name: ICMP redirects are disabled IPV4  
+    command: /usr/sbin/ipadm set-prop -p _ignore_redirect=1 ipv4
+  - name: ICMP redirects are disabled IPV6  
+    command: /usr/sbin/ipadm set-prop -p _ignore_redirect=1 ipv6
+  - name: Responses to echo requests on multicast addresses are disabled IPV4   
+    command: /usr/sbin/ipadm set-prop -p _respond_to_echo_multicast=0 ipv4
+  - name: Responses to echo requests on multicast addresses are disabled IPV6   
+    command: /usr/sbin/ipadm set-prop -p _respond_to_echo_multicast=0 ipv6 
+  - name: Responses to ICMP echo requests on broadcast addresses are disabled    
+    command: /usr/sbin/ipadm set-prop -p _respond_to_echo_broadcast=0 ip
+  - name: Strict multihoming is enabled  IPV4
+    command: /usr/sbin/ipadm set-prop -p _strict_dst_multihoming=1 ipv4
+  - name: Strict multihoming is enabled  IPV6
+    command: /usr/sbin/ipadm set-prop -p _strict_dst_multihoming=1 ipv6
+  - name: The maximum number of half-open TCP connections is at least 2   
+    command: /usr/sbin/ipadm set-prop -p _conn_req_max_q0=4096 tcp
+  
+  - name: Create the GRUB password file 01_password 
+    copy:
+      dest: "/usr/lib/grub2/bios/etc/grub.d/01_password"
+      content: |
+        #!/bin/sh
+        /usr/bin/cat > /rpool/boot/grub/password.cfg<<EOF
+        #
+        # GRUB password
+        #
+        set superusers="root"
+        password_pbkdf2 root grub.pbkdf2.sha512.10000.7838AA7ECAD7C8E5EA9C9678AFDCC6341C15DD00D1C4365949A734A6E13AB39D0F1F04367A0278BE01D1D31FABD86B2BD9B96E653AA9B3B64C367EE64FBD5F51.9F1896B2CA95A57E1B897D8F327F99A64BF4DB048296A941CE273793569A25F6CF2446F98E2BCAADA812C7E2A0273D16B0293B92A311FE06683C3FA5E21CBBD4
+        EOF
+        /usr/bin/chmod 600 /rpool/boot/grub/password.cfg
+        /usr/bin/echo 'source /@/boot/grub/password.cfg'
+ 
+  - name: protecting the grub.d/01_password   
+    file:
+      path: "/usr/lib/grub2/bios/etc/grub.d/01_password"
+      mode: 0700
+      owner: root
+
+  - name: Move the contents to the password.cfg file
+    copy:
+      dest: "/rpool/boot/grub/password.cfg"
+      content: |
+        #
+        # GRUB password
+        #
+        set superusers="root"
+        password_pbkdf2 root grub.pbkdf2.sha512.10000.7838AA7ECAD7C8E5EA9C9678AFDCC6341C15DD00D1C4365949A734A6E13AB39D0F1F04367A0278BE01D1D31FABD86B2BD9B96E653AA9B3B64C367EE64FBD5F51.9F1896B2CA95A57E1B897D8F327F99A64BF4DB048296A941CE273793569A25F6CF2446F98E2BCAADA812C7E2A0273D16B0293B92A311FE06683C3FA5E21CBBD4
+
+          
+        
+
+  - name: give permissions to passwor.cfg   
+    file:
+      path: "/rpool/boot/grub/password.cfg"
+      mode: 0600
+      owner: root
+  - name: sourcing the password.cfg 
+    command: /usr/bin/echo 'source /@/boot/grub/password.cfg' 
+  
+  - name: set a timeout for the menu 
+    command: /usr/sbin/bootadm set-menu timeout=30
+  
+  - name: Service svc:/network/rpc/smserver is disabled or not installed
+    command: /usr/sbin/svcadm disable rpc/smserver:default
+
+  - name: Name services are set to all local (files) only
+    copy:
+      dest: "/usr/lib/grub2/bios/etc/grub.d/01_password"
+      content: |
+        #
+        # _AUTOGENERATED_FROM_SMF_V1_
+        #
+        # WARNING: THIS FILE GENERATED FROM SMF DATA.
+        #   DO NOT EDIT THIS FILE.  EDITS WILL BE LOST.
+        # See nsswitch.conf(5) for details.
+
+        passwd: files
+        group:  files
+        hosts:  files 
+        ipnodes:        files 
+        networks:       files
+        protocols:      files
+        rpc:    files
+        ethers: files
+        netmasks:       files
+        bootparams:     files
+        publickey:      files
+        netgroup:       files
+        automount:      files
+        aliases:        files
+        services:       files
+        project:        files
+        auth_attr:      files
+        prof_attr:      files
+        tnrhtp: files
+        tnrhdb: files
+        sudoers:        files
+
+
+  - name: Apply changes to Name services are set to all local (files) only
+    command: /usr/sbin/svccfg -s name-service/switch
+
+
+  - name: Service svc:/network/rpc/gss is enabled if and only if Kerberos is configured
+    command: /usr/sbin/svcadm disable svc:/network/rpc/gss:default
+    
+  - name: creating ntp config
+    copy:
+      dest: "/etc/inet/ntp.conf"
+      content: |
+        server <server IP address> iburst
+        restrict default ignore
+  - name: enabling Service svc:/network/ntp 
+    command: /usr/sbin/svcadm enable ntp
+
+  - name: Service svc:/system/filesystem/rmvolmgr is disabled or not installed 
+    command: /usr/sbin/svcadm disable svc:/system/filesystem/rmvolmgr
